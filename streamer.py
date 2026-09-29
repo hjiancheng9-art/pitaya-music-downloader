@@ -37,7 +37,9 @@ class StreamerEngine:
         self._tick_thread = None
 
         # 创建 VLC 实例（无 GUI 模式）
-        self._instance = vlc.Instance("--quiet")
+        # --audio-resampler=soxr：VLC 3 内置的 SoX 高质量重采样器，
+        # 源与输出设备采样率不一致时保真（旧重采样器听感偏暗）
+        self._instance = vlc.Instance("--quiet", "--audio-resampler=soxr")
         self._player = self._instance.media_player_new()
         self._player.audio_set_volume(int(self._volume * 100))
 

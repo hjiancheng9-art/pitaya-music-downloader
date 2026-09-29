@@ -1,6 +1,6 @@
 # mget 音乐下载器配置
 output_dir: ~/Music/mget          # 下载目录
-audio_format: mp3                 # 输出格式
+audio_format: mp3                 # 输出格式: best=保留原始流(零转码,推荐) / mp3 / m4a / opus / flac / wav
 audio_quality: 0                  # 0=最高音质
 embed_metadata: true              # 嵌入歌曲信息
 embed_thumbnail: true             # 嵌入封面图

@@ -659,7 +659,7 @@ class MgetApp:
         ttk.Label(fmt_row, text="输出格式").pack(side=tk.LEFT)
         self.fmt_var = tk.StringVar(value=self.cfg.data.get("audio_format", "mp3"))
         fmt_combo = ttk.Combobox(fmt_row, textvariable=self.fmt_var,
-                                  values=["mp3", "m4a", "opus", "flac", "wav"],
+                                  values=["best", "mp3", "m4a", "opus", "flac", "wav"],
                                   width=8, state="readonly")
         fmt_combo.pack(side=tk.LEFT, padx=(8, 24))
 

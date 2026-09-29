@@ -482,19 +482,24 @@ def _build_dl_opts(cfg, source_key, cookies_browser=None, extractor_args=None):
     """构建下载用 yt-dlp 选项"""
     source = SOURCES[source_key]
     out_tmpl = os.path.join(cfg["output_dir"], "%(title)s.%(ext)s")
+    # audio_format = "best" 时不转码：保留 yt-dlp 抓到的原始流
+    # （opus/m4a 原样落盘），避免一次有损的 MP3 代际转码
+    postprocessors = []
+    if cfg["audio_format"] != "best":
+        postprocessors.append(
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": cfg["audio_format"],
+                "preferredquality": str(cfg["audio_quality"]),
+            }
+        )
     opts = {
         "format": "bestaudio/best",
         "outtmpl": out_tmpl,
         "quiet": False,
         "no_warnings": True,
         "http_headers": FAKE_HEADERS,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": cfg["audio_format"],
-                "preferredquality": str(cfg["audio_quality"]),
-            },
-        ],
+        "postprocessors": postprocessors,
         "postprocessor_args": {"ffmpeg": ["-y"]},
     }
     # 按源控制代理

@@ -18,6 +18,54 @@ MODE_RANDOM  = 1   # 随机播放
 MODE_REPEAT  = 2   # 单曲循环
 
 
+def _probe_stream_info(path):
+    """探测音频源流的采样率与声道数，返回 (sample_rate, channels)。
+    无法识别时返回 (None, None)，调用方保持现有 mixer 配置不动。"""
+    # 1) mutagen：只读元数据头，毫秒级，覆盖 mp3/flac/m4a/ogg/opus
+    try:
+        from mutagen import File as MutagenFile
+        mfile = MutagenFile(str(path))
+        info = getattr(mfile, "info", None)
+        sr = getattr(info, "sample_rate", None)
+        if sr:
+            ch = getattr(info, "channels", None) or 2
+            return int(sr), (1 if int(ch) == 1 else 2)
+    except Exception:
+        pass
+    # 2) WAV：标准库直接读头
+    if str(path).lower().endswith(".wav"):
+        try:
+            import wave
+            with wave.open(str(path), "rb") as w:
+                return w.getframerate(), (1 if w.getnchannels() == 1 else 2)
+        except Exception:
+            pass
+    return (None, None)
+
+
+def _ensure_mixer(frequency, channels):
+    """确保 mixer 以源流参数运行，消除 SDL_mixer 的低质量重采样。
+    配置一致时不重启；设备拒绝时回退到最通用的 44.1k 立体声。"""
+    cur = pygame.mixer.get_init()
+    if cur is not None:
+        cur_freq, _fmt, cur_ch = cur
+        if cur_freq == frequency and cur_ch == channels:
+            return
+    try:
+        pygame.mixer.quit()
+        pygame.mixer.pre_init(frequency=frequency, size=-16,
+                              channels=channels, buffer=4096)
+        pygame.mixer.init()
+    except Exception:
+        try:
+            pygame.mixer.quit()
+            pygame.mixer.pre_init(frequency=44100, size=-16,
+                                  channels=2, buffer=4096)
+            pygame.mixer.init()
+        except Exception:
+            pass  # 保底：维持现状，加载失败由 play_index 上报
+
+
 class PlayerEngine:
     """基于 pygame.mixer 的播放引擎，线程安全"""
 
@@ -103,6 +151,10 @@ class PlayerEngine:
             path = self.playlist[index]["path"]
 
         try:
+            # 按源流采样率重配 mixer，48k 源不再被压到 44.1k 重采样
+            freq, ch = _probe_stream_info(path)
+            if freq:
+                _ensure_mixer(freq, ch)
             pygame.mixer.music.load(path)
             pygame.mixer.music.set_volume(self.volume)
             pygame.mixer.music.play()
@@ -235,7 +287,12 @@ class PlayerEngine:
                 time.sleep(0.5)
                 if self._stopped or self._paused:
                     continue
-                if not pygame.mixer.music.get_busy():
+                try:
+                    busy = pygame.mixer.music.get_busy()
+                except pygame.error:
+                    # mixer 正被重配或已关闭（切歌/退出窗口期）— 本轮跳过
+                    continue
+                if not busy:
                     # 歌曲自然结束 — 只触发一次
                     if not self._song_ended and not self._paused and not self._stopped:
                         self._song_ended = True
