@@ -1,0 +1,27 @@
+# mget 音乐下载器配置
+output_dir: ~/Music/mget          # 下载目录
+audio_format: mp3                 # 输出格式
+audio_quality: 0                  # 0=最高音质
+embed_metadata: true              # 嵌入歌曲信息
+embed_thumbnail: true             # 嵌入封面图
+search_count: 20                  # 每个源搜索结果数量
+
+# 音源优先级（按顺序尝试，失败自动回退下一个）
+#   youtube    = YouTube（曲库最大，海外，需要代理）
+#   soundcloud = SoundCloud（独立/电子音乐丰富，海外，需要代理）
+#   bilibili   = 哔哩哔哩（中文曲库好，国内直连，不需要代理）
+source_priority:
+  - youtube
+  - soundcloud
+  - bilibili
+
+# 网易云直链优先（免费歌曲通过官方 outer/url 接口直接下载 mp3，无需代理）
+# 开启后免费歌曲优先走网易云直链，失败（VIP/版权受限）自动回退到上方音源
+netease_direct: true
+
+# 代理设置：YouTube/SoundCloud 需要科学上网
+# 留空则自动检测本地代理软件端口
+# 常见格式:
+#   Clash:    proxy: http://127.0.0.1:7890
+#   V2RayN:   proxy: socks5://127.0.0.1:10808
+# proxy: http://127.0.0.1:7890

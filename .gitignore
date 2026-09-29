@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+
+# Downloaded audio — never commit music files
+output/
+*.mp3
+*.flac
+*.m4a
+*.wav
+*.ogg
+
+# Local temp / debug scratch
+_tmp/
+tmp/
+
+# Local tool metadata
+.workbuddy/
+
+# Windows junk
+nul
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/
+
+# PyInstaller
+build/
+dist/
+*.spec
