@@ -171,6 +171,57 @@ class TestPlayerEngineMixer:
         mixer_mock.music.load.assert_called_once()
 
 
+class TestStopResume:
+    """stop 后续的播语义回归。
+
+    历史 bug: stop() 后点播放走 play_pause() 的 _stopped 分支无条件
+    play_index(0) — 用户停在第 5 首，再播放就跳回第 1 首。
+    修复后: 续播重播当前曲 (current_index 保留上下文)，从未播过才从头。"""
+
+    def test_resume_replays_current_song(self, mixer_mock, tmp_path):
+        files = [tmp_path / f"s{i}.mp3" for i in range(3)]
+        for f in files:
+            f.write_bytes(b"fake")
+        eng = PlayerEngine()
+        for f in files:
+            eng.add_song(str(f), "t", "a")
+        eng.play_index(2)
+        eng.stop()
+
+        assert eng.play_pause() is True
+        # 必须重播第 3 首（索引 2），而不是跳回第 1 首
+        mixer_mock.music.load.assert_called_with(str(files[2]))
+        assert eng.current_index == 2
+
+    def test_never_played_starts_from_first(self, mixer_mock, tmp_path):
+        f = tmp_path / "s0.mp3"
+        f.write_bytes(b"fake")
+        eng = PlayerEngine()
+        eng.add_song(str(f), "t", "a")
+        # 从未播放 → current_index == -1 → 从头
+        assert eng.play_pause() is True
+        assert eng.current_index == 0
+        mixer_mock.music.load.assert_called_once_with(str(f))
+
+    def test_empty_playlist_returns_false(self, mixer_mock):
+        eng = PlayerEngine()
+        assert eng.play_pause() is False
+
+    def test_pause_unpause_cycle_untouched(self, mixer_mock, tmp_path):
+        """暂停/恢复路径不受本次改动影响。"""
+        f = tmp_path / "s0.mp3"
+        f.write_bytes(b"fake")
+        eng = PlayerEngine()
+        eng.add_song(str(f), "t", "a")
+        eng.play_index(0)
+        eng.play_pause()  # 暂停
+        assert eng.is_paused()
+        assert eng.play_pause() is True  # 恢复
+        mixer_mock.music.unpause.assert_called_once()
+        # 恢复后没有重新 load（不是重播）
+        assert mixer_mock.music.load.call_count == 1
+
+
 class TestTickThreadResilience:
     def test_survives_mixer_not_initialized(self, mixer_mock):
         """切歌窗口期 mixer 短暂未初始化 — tick 线程必须存活而非崩掉。

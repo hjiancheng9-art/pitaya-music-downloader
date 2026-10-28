@@ -174,10 +174,12 @@ class PlayerEngine:
     def play_pause(self):
         """切换播放/暂停"""
         if self._stopped:
-            # 从未播放过，从头开始
-            if self.playlist:
-                return self.play_index(0)
-            return False
+            # 停止后续播：重播上一首（stop 会丢弃播放位置，从头重播），
+            # 从未播放过或列表为空时从头开始
+            if not self.playlist:
+                return False
+            idx = self.current_index if self.current_index >= 0 else 0
+            return self.play_index(idx)
 
         if self._paused:
             pygame.mixer.music.unpause()
