@@ -13,9 +13,10 @@ from pathlib import Path
 import pygame
 
 # 播放模式
-MODE_ORDER   = 0   # 顺序播放
+MODE_ORDER   = 0   # 顺序播放（列表循环）
 MODE_RANDOM  = 1   # 随机播放
 MODE_REPEAT  = 2   # 单曲循环
+MODE_STOP    = 3   # 播放一遍：列表播完即停止，不循环
 
 
 def _probe_stream_info(path):
@@ -205,6 +206,12 @@ class PlayerEngine:
                 idx = random.randrange(n)
             elif self.mode == MODE_REPEAT:
                 idx = self.current_index
+            elif self.mode == MODE_STOP:
+                if self.current_index + 1 >= n:
+                    # 播放一遍：最后一首播完即停，不再回绕
+                    self.stop()
+                    return False
+                idx = self.current_index + 1
             else:
                 idx = (self.current_index + 1) % n
         return self.play_index(idx)
@@ -263,7 +270,7 @@ class PlayerEngine:
     # ── 播放模式 ──────────────────────────────────────────
 
     def set_mode(self, mode):
-        """MODE_ORDER / MODE_RANDOM / MODE_REPEAT"""
+        """MODE_ORDER / MODE_RANDOM / MODE_REPEAT / MODE_STOP"""
         self.mode = mode
 
     # ── 状态查询 ──────────────────────────────────────────

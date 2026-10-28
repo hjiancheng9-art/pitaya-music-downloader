@@ -207,6 +207,32 @@ class TestStopResume:
         eng = PlayerEngine()
         assert eng.play_pause() is False
 
+    def test_mode_stop_next_past_last_stops(self, mixer_mock, tmp_path):
+        from player import MODE_STOP
+        files = [tmp_path / f"s{i}.mp3" for i in range(3)]
+        for f in files:
+            f.write_bytes(b"fake")
+        eng = PlayerEngine()
+        for f in files:
+            eng.add_song(str(f), "t", "a")
+        eng.set_mode(MODE_STOP)
+        eng.play_index(2)
+        assert eng.next() is False
+        assert eng._stopped
+
+    def test_mode_stop_next_midlist_advances(self, mixer_mock, tmp_path):
+        from player import MODE_STOP
+        files = [tmp_path / f"s{i}.mp3" for i in range(3)]
+        for f in files:
+            f.write_bytes(b"fake")
+        eng = PlayerEngine()
+        for f in files:
+            eng.add_song(str(f), "t", "a")
+        eng.set_mode(MODE_STOP)
+        eng.play_index(0)
+        assert eng.next() is True
+        assert eng.current_index == 1
+
     def test_pause_unpause_cycle_untouched(self, mixer_mock, tmp_path):
         """暂停/恢复路径不受本次改动影响。"""
         f = tmp_path / "s0.mp3"
