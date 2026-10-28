@@ -23,7 +23,7 @@ from mget import (
     _validate_proxy, translate_error, _build_dl_opts, download_netease,
 )
 from proxy_detector import find_best_proxy
-from player import PlayerEngine, scan_audio_files, MODE_ORDER, MODE_RANDOM, MODE_REPEAT
+from player import PlayerEngine, scan_audio_files, MODE_ORDER, MODE_RANDOM, MODE_REPEAT, MODE_STOP
 from streamer import StreamerEngine
 
 # ════════════════════════════════════════════════════════════
@@ -86,6 +86,8 @@ class ConfigManager:
                 "source_priority": ["youtube", "soundcloud", "bilibili"],
                 "netease_direct": True,
                 "proxy": None,
+                "player_mode": 0,
+                "stream_mode": 0,
             }
         with open(self.cfg_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
@@ -98,6 +100,8 @@ class ConfigManager:
         data.setdefault("source_priority", ["youtube", "soundcloud", "bilibili"])
         data.setdefault("netease_direct", True)
         data.setdefault("proxy", None)
+        data.setdefault("player_mode", MODE_ORDER)
+        data.setdefault("stream_mode", MODE_ORDER)
         return data
 
     def save(self):
@@ -111,6 +115,8 @@ class ConfigManager:
             "search_count": self.data["search_count"],
             "source_priority": self.data["source_priority"],
             "netease_direct": self.data.get("netease_direct", True),
+            "player_mode": self.data.get("player_mode", MODE_ORDER),
+            "stream_mode": self.data.get("stream_mode", MODE_ORDER),
         }
         if self.data.get("proxy"):
             data["proxy"] = self.data["proxy"]
@@ -392,6 +398,7 @@ class MgetApp:
             on_tick=lambda pos, total: self.root.after(0, self._on_player_tick, pos, total),
             on_song_end=lambda: self.root.after(0, self._on_song_end),
         )
+        self._restore_modes()
 
         # 流播引擎 (python-vlc)
         try:
@@ -890,7 +897,23 @@ class MgetApp:
 
         self.stream_mode_btn = ttk.Button(ctrl_row, text="🔁 顺序",
             style="Small.TButton", command=self._stream_toggle_mode)
+
         self.stream_mode_btn.pack(side=tk.LEFT, padx=(0, 8))
+        # 按启动时恢复的模式刷新按钮初始文案
+        _SMODE_TEXT = {MODE_ORDER: "🔁 顺序", MODE_RANDOM: "🔀 随机",
+                       MODE_REPEAT: "🔂 单曲", MODE_STOP: "⏹ 一遍"}
+        self.stream_mode_btn.configure(
+            text=_SMODE_TEXT.get(self._stream_mode, _SMODE_TEXT[MODE_ORDER]))
+
+        # 单曲循环开关：独立于模式循环，亮色 = 开，灰色 = 关
+        self.stream_repeat_btn = tk.Button(ctrl_row, text="🔂",
+            font=FONT["small"], fg=CLR["text3"],
+            bg=CLR["surface"], activebackground=CLR["surface"],
+            activeforeground=CLR["accent"], bd=0, cursor="hand2",
+            command=self._stream_toggle_repeat_one)
+        self.stream_repeat_btn.configure(
+            fg=CLR["accent"] if self._stream_mode == MODE_REPEAT else CLR["text3"])
+        self.stream_repeat_btn.pack(side=tk.LEFT, padx=(0, 8))
 
         ttk.Label(ctrl_row, text="🔊", font=FONT["small"],
             background=CLR["surface"]).pack(side=tk.LEFT, padx=(0, 4))
@@ -980,9 +1003,11 @@ class MgetApp:
         self._player_vol_scale.pack(side=tk.LEFT)
 
         # 模式
-        MODE_LABELS = {MODE_ORDER: "🔁", MODE_RANDOM: "🔀", MODE_REPEAT: "🔂"}
+        MODE_LABELS = {MODE_ORDER: "🔁 顺序", MODE_RANDOM: "🔀 随机",
+                       MODE_REPEAT: "🔂 单曲", MODE_STOP: "⏹ 一遍"}
         self._player_mode_btn = tk.Button(ctrl,
                                            text=MODE_LABELS[self.player.mode],
+                                           width=9,
                                            command=self._toggle_mode, **btn_cfg)
         self._player_mode_btn.pack(side=tk.LEFT, padx=(12, 0))
 
@@ -1214,10 +1239,13 @@ class MgetApp:
                     text=f"{self._fmt_time(pos)} / {self._fmt_time(total)}")
 
     def _toggle_mode(self):
-        """切换播放模式: ORDER → RANDOM → REPEAT → ORDER"""
-        MODE_LABELS = {MODE_ORDER: "🔁", MODE_RANDOM: "🔀", MODE_REPEAT: "🔂"}
-        MODE_NAMES = {MODE_ORDER: "顺序", MODE_RANDOM: "随机", MODE_REPEAT: "单曲循环"}
-        next_mode = {MODE_ORDER: MODE_RANDOM, MODE_RANDOM: MODE_REPEAT, MODE_REPEAT: MODE_ORDER}
+        """切换播放模式: ORDER → RANDOM → REPEAT → STOP → ORDER"""
+        MODE_LABELS = {MODE_ORDER: "🔁 顺序", MODE_RANDOM: "🔀 随机",
+                       MODE_REPEAT: "🔂 单曲", MODE_STOP: "⏹ 一遍"}
+        MODE_NAMES = {MODE_ORDER: "顺序(列表循环)", MODE_RANDOM: "随机",
+                      MODE_REPEAT: "单曲循环", MODE_STOP: "一遍(播完即停)"}
+        next_mode = {MODE_ORDER: MODE_RANDOM, MODE_RANDOM: MODE_REPEAT,
+                     MODE_REPEAT: MODE_STOP, MODE_STOP: MODE_ORDER}
 
         new_mode = next_mode[self.player.mode]
         self.player.set_mode(new_mode)
@@ -1435,7 +1463,8 @@ class MgetApp:
             self._stream_next()   # 单曲循环：_stream_next 内部处理
         elif self.stream_results and self._stream_current_idx >= 0:
             total = len(self.stream_results)
-            if self._stream_mode == MODE_ORDER:
+            if self._stream_mode in (MODE_ORDER, MODE_STOP):
+                # 顺序 / 一遍：最后一首播完即停
                 if self._stream_current_idx + 1 < total:
                     self._stream_next()
                 else:
@@ -1476,6 +1505,13 @@ class MgetApp:
         elif self._stream_mode == MODE_RANDOM:
             import random
             idx = random.randint(0, total - 1)
+        elif self._stream_mode == MODE_STOP:
+            # 一遍：手动点下一首到末尾即停
+            if self._stream_current_idx + 1 >= total:
+                self._stream_stop()
+                self.stream_status_var.set("列表播放完毕")
+                return
+            idx = self._stream_current_idx + 1
         else:
             idx = self._stream_current_idx + 1
             if idx >= total:
@@ -1487,17 +1523,36 @@ class MgetApp:
             self.stream_tree.see(items[idx])
             self._stream_play_selected()
 
+    def _stream_toggle_repeat_one(self):
+        """单曲循环开关: 开 → MODE_REPEAT，关 → 回顺序"""
+        if self._stream_mode == MODE_REPEAT:
+            self._stream_mode = MODE_ORDER
+            self.stream_repeat_btn.configure(fg=CLR["text3"])
+            self.stream_mode_btn.configure(text="🔁 顺序")
+            self.stream_status_var.set("单曲循环: 关")
+        else:
+            self._stream_mode = MODE_REPEAT
+            self.stream_repeat_btn.configure(fg=CLR["accent"])
+            self.stream_mode_btn.configure(text="🔂 单曲")
+            self.stream_status_var.set("单曲循环: 开")
+
     def _stream_toggle_mode(self):
-        """切换在线播放模式"""
+        """切换在线播放模式: 顺序 → 随机 → 单曲 → 一遍"""
         if self._stream_mode == MODE_ORDER:
             self._stream_mode = MODE_RANDOM
             self.stream_mode_btn.configure(text="🔀 随机")
         elif self._stream_mode == MODE_RANDOM:
             self._stream_mode = MODE_REPEAT
             self.stream_mode_btn.configure(text="🔂 单曲")
+        elif self._stream_mode == MODE_REPEAT:
+            self._stream_mode = MODE_STOP
+            self.stream_mode_btn.configure(text="⏹ 一遍")
         else:
             self._stream_mode = MODE_ORDER
             self.stream_mode_btn.configure(text="🔁 顺序")
+        # 同步单曲循环开关按钮的亮灭状态
+        self.stream_repeat_btn.configure(
+            fg=CLR["accent"] if self._stream_mode == MODE_REPEAT else CLR["text3"])
 
     def _reset_stream_player_bar(self):
         """重置 mini player bar 到空闲"""
@@ -1519,8 +1574,23 @@ class MgetApp:
         if self.streamer:
             self.streamer.set_volume(float(val) / 100.0)
 
+    def _restore_modes(self):
+        """从配置恢复播放模式到两个引擎 (启动时调用)"""
+        self.player.set_mode(int(self.cfg.data.get("player_mode", MODE_ORDER)))
+        self._stream_mode = int(self.cfg.data.get("stream_mode", MODE_ORDER))
+
+    def _persist_modes(self):
+        """把当前播放模式写回配置，下次启动自动恢复"""
+        try:
+            self.cfg.data["player_mode"] = self.player.mode
+            self.cfg.data["stream_mode"] = self._stream_mode
+            self.cfg.save()
+        except Exception:
+            pass  # 关闭/保存阶段失败不应阻塞窗口销毁
+
     def _on_close(self):
         """关闭窗口前清理资源"""
+        self._persist_modes()
         if self.streamer:
             self.streamer.shutdown()
         self.root.destroy()
@@ -2018,6 +2088,9 @@ class MgetApp:
                 priority.append(src)
         self.cfg.data["source_priority"] = priority
         self.cfg.data["netease_direct"] = self.netease_direct_var.get()
+        # 播放模式持久化
+        self.cfg.data["player_mode"] = self.player.mode
+        self.cfg.data["stream_mode"] = self._stream_mode
 
         self.cfg.save()
         self.dir_var.set(f"下载目录: {os.path.expanduser(self.cfg.data['output_dir'])}")
