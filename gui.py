@@ -2060,7 +2060,23 @@ class MgetApp:
 #  入口
 # ════════════════════════════════════════════════════════════
 
+_mutex_handle = None
+
+def _check_single_instance():
+    """Windows 单实例锁。若已有实例在运行则返回 True。"""
+    global _mutex_handle
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    _mutex_handle = kernel32.CreateMutexW(None, False, "PitayaMusicSingleInstance")
+    return kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+
 def main():
+    if _check_single_instance():
+        import tkinter.messagebox as mb
+        mb.showwarning("Pitaya Music", "程序已在运行，请勿重复打开。")
+        return
     try:
         root = tk.Tk()
         app = MgetApp(root)
