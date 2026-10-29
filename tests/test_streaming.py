@@ -391,3 +391,99 @@ class TestStreamStopAndTicks:
         app._on_stream_error("播放失败，链接可能已失效或网络不通")
         assert _status(app) == "播放失败，链接可能已失效或网络不通"
         assert app.stream_pp_btn["text"] == "▶ 播放"
+
+
+# ─────────────────────────────────────────────────────────────
+#  GUI 层: 本地播放 vs 在线流播 互斥 (双引擎防重叠)
+# ─────────────────────────────────────────────────────────────
+
+def _muted_shell(**over):
+    """用于测试 _stop_streamer 互斥的壳。"""
+    app = gui_mod.MgetApp.__new__(gui_mod.MgetApp)
+    app.streamer = MagicMock()
+    app.streamer.is_stopped.return_value = False  # 在线正在播
+    app._reset_stream_player_bar = MagicMock()
+    app.player = MagicMock()
+    app.player.is_playing.return_value = False
+    app.player.is_paused.return_value = False
+    app._player_play_btn = WidgetStub(text="▶")
+    for k, v in over.items():
+        setattr(app, k, v)
+    return app
+
+
+class TestLocalStreamMutualExclusion:
+    """本地播放起播/切歌前必须停掉在线流播, 否则两个引擎同时出声。"""
+
+    def test_stop_streamer_stops_when_active(self):
+        app = _muted_shell()
+        app._stop_streamer()
+        app.streamer.stop.assert_called_once()
+        app._reset_stream_player_bar.assert_called_once()
+
+    def test_stop_streamer_noop_when_already_stopped(self):
+        app = _muted_shell()
+        app.streamer.is_stopped.return_value = True
+        app._stop_streamer()
+        app.streamer.stop.assert_not_called()
+        app._reset_stream_player_bar.assert_not_called()
+
+    def test_stop_streamer_noop_when_no_vlc(self):
+        app = _muted_shell(streamer=None)
+        app._stop_streamer()  # 不抛异常
+        app._reset_stream_player_bar.assert_not_called()
+
+    def test_playlist_double_click_stops_stream(self):
+        """播放列表双击起播 → 停在线流播 (回归: 此前未互斥)。"""
+        app = _muted_shell(
+            _playlist_tree=MagicMock(),
+            _playlist_items=[{"path": "/x.mp3"}],
+            _refresh_playlist_display=MagicMock(),
+            _update_player_bar_state=MagicMock(),
+        )
+        app._playlist_tree.identify_row.return_value = "0"
+        ev = MagicMock(); ev.y = 10
+        app._on_playlist_double_click(ev)
+        app.streamer.stop.assert_called_once()
+        app.player.play_index.assert_called_once_with(0)
+
+    def test_play_next_stops_stream(self):
+        app = _muted_shell(
+            _refresh_playlist_display=MagicMock(),
+            _update_player_bar_state=MagicMock(),
+        )
+        app.player.next = MagicMock()
+        app._play_next()
+        app.streamer.stop.assert_called_once()
+        app.player.next.assert_called_once()
+
+    def test_play_prev_stops_stream(self):
+        app = _muted_shell(
+            _refresh_playlist_display=MagicMock(),
+            _update_player_bar_state=MagicMock(),
+        )
+        app.player.prev = MagicMock()
+        app._play_prev()
+        app.streamer.stop.assert_called_once()
+        app.player.prev.assert_called_once()
+
+    def test_play_pause_idle_branch_stops_stream(self):
+        """本地停止态按播放 → 走 else 分支起播前先停在线。"""
+        p = MagicMock()
+        app = _muted_shell(
+            player=p,
+            _set_status=MagicMock(),
+        )
+        p.is_paused.return_value = False
+        p.is_playing.return_value = False
+        p.playlist = ["/a.mp3"]
+        p.play_pause.return_value = True
+        p.next = MagicMock()
+        p.prev = MagicMock()
+        p.current_song.return_value = None  # _update_player_bar_state 不摸到真实歌词标签
+        app._update_player_bar_state = MagicMock()
+        app._refresh_playlist_display = MagicMock()
+        app._play_pause()
+        app.streamer.stop.assert_called_once()
+        p.play_pause.assert_called_once()
+

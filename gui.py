@@ -1130,11 +1130,18 @@ class MgetApp:
             return
         idx = int(item)
         if idx < len(self._playlist_items):
+            self._stop_streamer()  # 播放列表起播 → 停在线流播，防重叠
             self.player.play_index(idx)
             self._refresh_playlist_display()
             self._update_player_bar_state()
 
     # ── 播放器交互 ────────────────────────────────────────
+
+    def _stop_streamer(self):
+        """停止在线流播并复位 mini 栏 — 任何本地起播前调用，防双引擎重叠出声"""
+        if self.streamer and not self.streamer.is_stopped():
+            self.streamer.stop()
+            self._reset_stream_player_bar()
 
     def _play_pause(self):
         if self.player.is_paused():
@@ -1145,9 +1152,7 @@ class MgetApp:
             self._player_play_btn.configure(text="▶")
         else:
             # 停止流播（避免音频重叠）
-            if self.streamer and not self.streamer.is_stopped():
-                self.streamer.stop()
-                self._reset_stream_player_bar()
+            self._stop_streamer()
             # 未在播放，尝试播放第一首
             if self.player.playlist:
                 if self.player.play_pause():
@@ -1158,11 +1163,13 @@ class MgetApp:
                 self._set_status("播放列表为空，请先下载歌曲", "warning")
 
     def _play_next(self):
+        self._stop_streamer()  # 本地起播/切歌 → 停在线流播，防重叠
         self.player.next()
         self._update_player_bar_state()
         self._refresh_playlist_display()
 
     def _play_prev(self):
+        self._stop_streamer()
         self.player.prev()
         self._update_player_bar_state()
         self._refresh_playlist_display()
@@ -1983,6 +1990,7 @@ class MgetApp:
                             self._scan_and_add_to_playlist()
                             # 试听模式：自动播放刚下载的第一首歌
                             if self._preview_mode and len(self.player.playlist) > prev_count:
+                                self._stop_streamer()  # 试听起播 → 停在线流播，防重叠
                                 self.player.play_index(len(self.player.playlist) - 1)
                                 self._player_play_btn.configure(text="⏸")
                                 self._update_player_bar_state()
