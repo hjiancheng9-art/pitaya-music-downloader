@@ -25,6 +25,7 @@ from mget import (
 from proxy_detector import find_best_proxy
 from player import PlayerEngine, scan_audio_files, MODE_ORDER, MODE_RANDOM, MODE_REPEAT, MODE_STOP
 from streamer import StreamerEngine
+import stream_songs
 
 # ════════════════════════════════════════════════════════════
 #  配色 & 常量
@@ -466,10 +467,10 @@ class MgetApp:
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=16, pady=(8, 12))
 
+        self._build_stream_tab()
         self._build_search_tab()
         self._build_playlist_tab()
         self._build_settings_tab()
-        self._build_stream_tab()
 
         # tab 切换时控制底部播放器栏显隐
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -477,9 +478,9 @@ class MgetApp:
     def _on_tab_changed(self, event=None):
         """切 tab 时自动显示/隐藏底部播放器栏"""
         idx = self.notebook.index("current")
-        if idx == 3:  # 在线曲库 → 隐藏底部播放器
+        if idx == 0:  # 在线曲库(首 tab) → 隐藏底部本地播放器栏
             self._player_bar.pack_forget()
-        else:  # 其他 tab → 显示底部播放器
+        else:  # 其他 tab → 显示底部播放器栏
             self._player_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
     def _build_search_tab(self):
@@ -854,6 +855,10 @@ class MgetApp:
             command=self._stream_clear)
         self.stream_clear_btn.pack(side=tk.RIGHT, padx=(0, 0))
 
+        self.stream_curated_btn = ttk.Button(btn_frame, text="⭐ 精选",
+            command=self._load_curated)
+        self.stream_curated_btn.pack(side=tk.RIGHT, padx=(0, 6))
+
         # ── Mini 播放栏 ──
         mini_frame = ttk.Frame(tab, style="Card.TFrame")
         # NOTE: 打包延后到本方法末尾统一执行（side=BOTTOM）。
@@ -933,7 +938,9 @@ class MgetApp:
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 4))
         table_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
 
-        self.stream_status_var = tk.StringVar(value="就绪 — 双击搜索到的歌曲即可在线播放")
+        self.stream_status_var = tk.StringVar(value="就绪 — 双击歌曲即可在线播放")
+        # 开箱即有内容: 启动时载入内置精选歌单
+        self._load_curated()
         self.stream_status_lbl = ttk.Label(status_frame,
             textvariable=self.stream_status_var, style="Sub.TLabel")
         self.stream_status_lbl.pack(side=tk.LEFT, padx=12, pady=6)
@@ -1332,6 +1339,20 @@ class MgetApp:
                 i + 1, r.get("name", ""), r.get("artists", ""),
                 r.get("album", "") or "", dur), tags=(tag,))
         self.stream_status_var.set(f"共 {len(self.stream_results)} 首 | 双击播放")
+
+    def _load_curated(self):
+        """载入内置精选歌单 — 开箱即有内容, 点歌时才联网拉流"""
+        self.stream_results = list(stream_songs.get_curated())
+        for item in self.stream_tree.get_children():
+            self.stream_tree.delete(item)
+        for i, r in enumerate(self.stream_results):
+            dur = fmt_duration(r.get("duration", 0))
+            tag = "stream_even" if i % 2 == 0 else "stream_odd"
+            self.stream_tree.insert("", tk.END, values=(
+                i + 1, r.get("name", ""), r.get("artists", ""),
+                r.get("album", "") or "", dur), tags=(tag,))
+        self.stream_status_var.set(
+            f"内置精选 {len(self.stream_results)} 首 | 双击在线播放")
 
     def _stream_play_selected(self):
         """播放选中歌曲"""
