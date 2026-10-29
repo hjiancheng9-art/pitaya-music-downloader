@@ -106,7 +106,17 @@ class ConfigManager:
         return data
 
     def save(self):
+        """保存配置 — 保留原文件的注释/空行/结构, 最小化改动。
+
+        - 值未变的键: 原行原样保留 (含行尾注释)
+        - 值变了的键: 只重写值部分, 行尾注释保留
+        - 列表键: 重写条目, 键行与上方注释保留
+        - 新键: 追加到文件末尾
+        - 文件不存在或解析失败: 回退整文件 yaml.dump
+        """
+        import re
         import yaml
+
         data = {
             "output_dir": self.data["output_dir"],
             "audio_format": self.data["audio_format"],
@@ -121,8 +131,104 @@ class ConfigManager:
         }
         if self.data.get("proxy"):
             data["proxy"] = self.data["proxy"]
-        with open(self.cfg_path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
+
+        def _fmt(v):
+            if isinstance(v, bool):
+                return "true" if v else "false"
+            if isinstance(v, int):
+                return str(v)
+            text = yaml.dump(v, default_flow_style=True, allow_unicode=True)
+            # pyyaml 会附带文档结束标记 '...', 逐行渲染前必须剥掉
+            text = text.rstrip()
+            if text.endswith("..."):
+                text = text[:-3].rstrip()
+            return text
+
+        old_lines = None
+        old_data = {}
+        raw = ""
+        if self.cfg_path.exists():
+            try:
+                raw = self.cfg_path.read_text(encoding="utf-8")
+                old_data = yaml.safe_load(raw) or {}
+                old_lines = raw.splitlines()
+            except Exception:
+                old_lines = None
+
+        if old_lines is None:
+            # 无原文件 / 解析失败 → 全量 dump
+            self.cfg_path.write_text(
+                yaml.dump(data, allow_unicode=True, default_flow_style=False),
+                encoding="utf-8")
+            return
+
+        key_re = re.compile(r"^([A-Za-z_][\w]*):(.*)$")
+        out = []
+        handled = set()
+        i, n = 0, len(old_lines)
+        while i < n:
+            line = old_lines[i]
+            # YAML 文档标记 (... / ---) 不参与保存重建, 直接丢弃
+            if line.strip() in ("...", "---"):
+                i += 1
+                continue
+            m = key_re.match(line) if line[:1] not in (" ", "\t") else None
+            if not m:
+                out.append(line)  # 注释行/空行/列表条目等原样保留
+                i += 1
+                continue
+            key, rest = m.group(1), m.group(2)
+            if key not in data:
+                out.append(line)  # 不在保存范围内的键, 原样保留
+                i += 1
+                continue
+            new_val = data[key]
+            old_val = old_data.get(key) if isinstance(old_data, dict) else None
+            same = (new_val == old_val)
+            # 行尾注释 (值后跟 空白+#)
+            ch = rest.find("#")
+            comment = rest[ch:] if (ch > 0 and rest[ch - 1] in " \t") else ""
+            if isinstance(new_val, list):
+                if rest.strip() == "":
+                    # 块列表: 键行保留, 重写/保留条目, 消费原条目行
+                    out.append(f"{key}:")
+                    j = i + 1
+                    while j < n and re.match(r"^\s*-\s", old_lines[j]):
+                        j += 1
+                    if same:
+                        out.extend(old_lines[i + 1:j])
+                    else:
+                        out.extend(f"  - {_fmt(x)}" for x in new_val)
+                    i = j
+                else:
+                    out.append(
+                        f"{key}: [{', '.join(_fmt(x) for x in new_val)}]"
+                        + (f"  {comment}" if comment else ""))
+                    i += 1
+            elif same:
+                out.append(line)  # 未变: 整行原样 (含注释与对齐)
+                i += 1
+            else:
+                out.append(f"{key}: {_fmt(new_val)}" + (f"  {comment}" if comment else ""))
+                i += 1
+            handled.add(key)
+
+        # 新键追加到末尾
+        pending = [k for k in data if k not in handled]
+        if pending:
+            if out and out[-1].strip() != "":
+                out.append("")
+            for k in pending:
+                v = data[k]
+                if isinstance(v, list):
+                    out.append(f"{k}:")
+                    out.extend(f"  - {_fmt(x)}" for x in v)
+                else:
+                    out.append(f"{k}: {_fmt(v)}")
+        text = "\n".join(out)
+        if raw.endswith("\n"):
+            text += "\n"
+        self.cfg_path.write_text(text, encoding="utf-8")
 
     def get_full_config(self):
         """返回 mget.load_config 兼容的完整 dict"""
